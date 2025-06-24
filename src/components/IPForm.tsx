@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { X, Plus, Edit3 } from 'lucide-react'
 import { IPFormData, IPRecord } from '../types/ip'
@@ -18,22 +18,40 @@ export const IPForm: React.FC<IPFormProps> = ({ isOpen, onClose, editingRecord }
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting }
   } = useForm<IPFormData>({
-    defaultValues: editingRecord ? {
-      ip: editingRecord.ip,
-      port: editingRecord.port,
-      username: editingRecord.username,
-      password: editingRecord.password,
-      name: editingRecord.name || '',
-      notes: editingRecord.notes || '',
-      expiry_date: editingRecord.expiry_date.split('T')[0],
-      webhook_url: editingRecord.webhook_url || ''
-    } : {
+    defaultValues: {
       port: 80,
       expiry_date: new Date().toISOString().split('T')[0]
     }
   })
+
+  // 当编辑记录改变时，更新表单值
+  useEffect(() => {
+    if (editingRecord) {
+      setValue('ip', editingRecord.ip)
+      setValue('port', editingRecord.port)
+      setValue('username', editingRecord.username)
+      setValue('password', editingRecord.password)
+      setValue('name', editingRecord.name || '')
+      setValue('notes', editingRecord.notes || '')
+      setValue('expiry_date', editingRecord.expiry_date.split('T')[0])
+      setValue('webhook_url', editingRecord.webhook_url || '')
+    } else {
+      // 新建时重置为默认值
+      reset({
+        ip: '',
+        port: 80,
+        username: '',
+        password: '',
+        name: '',
+        notes: '',
+        expiry_date: new Date().toISOString().split('T')[0],
+        webhook_url: ''
+      })
+    }
+  }, [editingRecord, setValue, reset])
 
   const onSubmit = async (data: IPFormData) => {
     try {
@@ -42,8 +60,7 @@ export const IPForm: React.FC<IPFormProps> = ({ isOpen, onClose, editingRecord }
       } else {
         await createMutation.mutateAsync(data)
       }
-      reset()
-      onClose()
+      handleClose()
     } catch (error) {
       // Error handling is done in the mutation hooks
     }
