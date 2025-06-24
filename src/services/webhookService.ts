@@ -179,10 +179,38 @@ export const sendWebhookNotification = async (
   notification: WebhookNotification
 ): Promise<boolean> => {
   try {
+    console.log('Sending webhook notification:', { webhookUrl, type: notification.type })
+    
     const card = createLarkCard(notification)
     
-    // Use the Supabase Edge Function to send the webhook
+    // 首先尝试直接发送（用于调试）
+    try {
+      const directResponse = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(card)
+      })
+
+      console.log('Direct webhook response:', {
+        status: directResponse.status,
+        statusText: directResponse.statusText,
+        ok: directResponse.ok
+      })
+
+      if (directResponse.ok) {
+        console.log('Direct webhook sent successfully')
+        return true
+      }
+    } catch (directError) {
+      console.log('Direct webhook failed, trying Edge Function:', directError)
+    }
+
+    // 如果直接发送失败，使用 Edge Function
     const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-webhook`
+    
+    console.log('Using Edge Function:', edgeFunctionUrl)
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
@@ -196,12 +224,20 @@ export const sendWebhookNotification = async (
       })
     })
 
+    console.log('Edge Function response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    })
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+      console.error('Edge Function error:', errorData)
       throw new Error(`Edge Function error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`)
     }
 
     const result = await response.json()
+    console.log('Edge Function result:', result)
     return result.success === true
   } catch (error) {
     console.error('Failed to send webhook notification:', error)
@@ -220,7 +256,9 @@ export const logWebhookAttempt = async (
   try {
     const { supabase } = await import('../lib/supabase')
     
-    await supabase
+    console.log('Logging webhook attempt:', { type, message, url, status, recordId })
+    
+    const { error } = await supabase
       .from('webhook_logs')
       .insert({
         type,
@@ -229,6 +267,12 @@ export const logWebhookAttempt = async (
         status,
         record_id: recordId
       })
+
+    if (error) {
+      console.error('Failed to log webhook attempt:', error)
+    } else {
+      console.log('Webhook attempt logged successfully')
+    }
   } catch (error) {
     console.error('Failed to log webhook attempt:', error)
   }

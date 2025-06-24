@@ -46,6 +46,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    console.log('Sending webhook to:', webhookUrl);
+    console.log('Card data:', JSON.stringify(card, null, 2));
+
     // Send the webhook notification to the external URL
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -55,12 +58,25 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify(card)
     });
 
+    console.log('Webhook response status:', response.status);
+    console.log('Webhook response ok:', response.ok);
+
+    const responseText = await response.text();
+    console.log('Webhook response body:', responseText);
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
     }
 
     return new Response(
-      JSON.stringify({ success: true, message: "Webhook sent successfully" }),
+      JSON.stringify({ 
+        success: true, 
+        message: "Webhook sent successfully",
+        response: {
+          status: response.status,
+          body: responseText
+        }
+      }),
       {
         status: 200,
         headers: {
@@ -76,7 +92,8 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error occurred" 
+        error: error instanceof Error ? error.message : "Unknown error occurred",
+        stack: error instanceof Error ? error.stack : undefined
       }),
       {
         status: 500,
