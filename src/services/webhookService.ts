@@ -6,7 +6,7 @@ export interface WebhookNotification {
   message: string
 }
 
-// 创建飞书卡片格式的消息
+// 创建飞书卡片格式的消息 - 移除图片，使用纯文本卡片
 export const createLarkCard = (notification: WebhookNotification) => {
   const { type, record } = notification
   
@@ -173,6 +173,36 @@ export const createLarkCard = (notification: WebhookNotification) => {
   }
 }
 
+// 创建简化版本的消息（备用方案）
+export const createSimpleMessage = (notification: WebhookNotification) => {
+  const { type, record } = notification
+  
+  let emoji = ''
+  let title = ''
+  
+  switch (type) {
+    case 'ip_offline':
+      emoji = '🚨'
+      title = 'IP连接异常'
+      break
+    case 'ip_expiry':
+      emoji = '⏰'
+      title = 'IP即将到期'
+      break
+    case 'service_expiry':
+      emoji = '❌'
+      title = 'IP已过期'
+      break
+  }
+
+  const expiryDate = new Date(record.expiry_date).toLocaleDateString('zh-CN')
+  const currentTime = new Date().toLocaleString('zh-CN')
+
+  return {
+    text: `${emoji} ${title}\n\nIP地址: ${record.ip}:${record.port}\n名称: ${record.name || '未设置'}\n用户名: ${record.username}\n到期时间: ${expiryDate}\n检测时间: ${currentTime}\n\n${notification.message}`
+  }
+}
+
 // 发送 webhook 通知
 export const sendWebhookNotification = async (
   webhookUrl: string,
@@ -182,10 +212,13 @@ export const sendWebhookNotification = async (
     console.log('Sending webhook notification:', { webhookUrl, type: notification.type })
     
     const card = createLarkCard(notification)
+    const simpleMessage = createSimpleMessage(notification)
     
-    // 首先尝试直接发送（用于调试）
+    console.log('Card payload:', JSON.stringify(card, null, 2))
+    
+    // 首先尝试发送卡片格式
     try {
-      const directResponse = await fetch(webhookUrl, {
+      const cardResponse = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -193,55 +226,97 @@ export const sendWebhookNotification = async (
         body: JSON.stringify(card)
       })
 
-      console.log('Direct webhook response:', {
-        status: directResponse.status,
-        statusText: directResponse.statusText,
-        ok: directResponse.ok
+      console.log('Card webhook response:', {
+        status: cardResponse.status,
+        statusText: cardResponse.statusText,
+        ok: cardResponse.ok
       })
 
-      if (directResponse.ok) {
-        console.log('Direct webhook sent successfully')
+      if (cardResponse.ok) {
+        const responseText = await cardResponse.text()
+        console.log('Card webhook response body:', responseText)
+        console.log('Card webhook sent successfully')
         return true
+      } else {
+        const errorText = await cardResponse.text()
+        console.log('Card webhook failed, response:', errorText)
+        throw new Error(`Card webhook failed: ${cardResponse.status} ${errorText}`)
       }
-    } catch (directError) {
-      console.log('Direct webhook failed, trying Edge Function:', directError)
-    }
+    } catch (cardError) {
+      console.log('Card webhook failed, trying simple message:', cardError)
+      
+      // 如果卡片格式失败，尝试简单文本格式
+      try {
+        const simpleResponse = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(simpleMessage)
+        })
 
+        console.log('Simple message response:', {
+          status: simpleResponse.status,
+          statusText: simpleResponse.statusText,
+          ok: simpleResponse.ok
+        })
+
+        if (simpleResponse.ok) {
+          const responseText = await simpleResponse.text()
+          console.log('Simple message response body:', responseText)
+          console.log('Simple message sent successfully')
+          return true
+        } else {
+          const errorText = await simpleResponse.text()
+          console.log('Simple message failed, response:', errorText)
+          throw new Error(`Simple message failed: ${simpleResponse.status} ${errorText}`)
+        }
+      } catch (simpleError) {
+        console.log('Simple message also failed, trying Edge Function:', simpleError)
+        throw simpleError
+      }
+    }
+  } catch (directError) {
+    console.log('Direct webhook failed, trying Edge Function:', directError)
+    
     // 如果直接发送失败，使用 Edge Function
-    const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-webhook`
-    
-    console.log('Using Edge Function:', edgeFunctionUrl)
-    
-    const response = await fetch(edgeFunctionUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        webhookUrl,
-        card
+    try {
+      const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-webhook`
+      
+      console.log('Using Edge Function:', edgeFunctionUrl)
+      
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          webhookUrl,
+          card: createLarkCard(notification),
+          simpleMessage: createSimpleMessage(notification)
+        })
       })
-    })
 
-    console.log('Edge Function response:', {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok
-    })
+      console.log('Edge Function response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      })
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      console.error('Edge Function error:', errorData)
-      throw new Error(`Edge Function error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Edge Function error:', errorData)
+        throw new Error(`Edge Function error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`)
+      }
+
+      const result = await response.json()
+      console.log('Edge Function result:', result)
+      return result.success === true
+    } catch (edgeError) {
+      console.error('Edge Function also failed:', edgeError)
+      return false
     }
-
-    const result = await response.json()
-    console.log('Edge Function result:', result)
-    return result.success === true
-  } catch (error) {
-    console.error('Failed to send webhook notification:', error)
-    return false
   }
 }
 

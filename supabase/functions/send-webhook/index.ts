@@ -1,6 +1,7 @@
 interface WebhookRequest {
   webhookUrl: string;
   card: any;
+  simpleMessage?: any;
 }
 
 const corsHeaders = {
@@ -31,11 +32,11 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { webhookUrl, card }: WebhookRequest = await req.json();
+    const { webhookUrl, card, simpleMessage }: WebhookRequest = await req.json();
 
-    if (!webhookUrl || !card) {
+    if (!webhookUrl) {
       return new Response(
-        JSON.stringify({ error: "Missing webhookUrl or card in request body" }),
+        JSON.stringify({ error: "Missing webhookUrl in request body" }),
         {
           status: 400,
           headers: {
@@ -47,44 +48,101 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log('Sending webhook to:', webhookUrl);
-    console.log('Card data:', JSON.stringify(card, null, 2));
 
-    // Send the webhook notification to the external URL
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(card)
-    });
+    let success = false;
+    let lastError = null;
+    let responseData = null;
 
-    console.log('Webhook response status:', response.status);
-    console.log('Webhook response ok:', response.ok);
+    // 首先尝试发送卡片格式
+    if (card) {
+      try {
+        console.log('Trying card format:', JSON.stringify(card, null, 2));
+        
+        const cardResponse = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(card)
+        });
 
-    const responseText = await response.text();
-    console.log('Webhook response body:', responseText);
+        console.log('Card response status:', cardResponse.status);
+        console.log('Card response ok:', cardResponse.ok);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
+        const cardResponseText = await cardResponse.text();
+        console.log('Card response body:', cardResponseText);
+
+        if (cardResponse.ok) {
+          success = true;
+          responseData = {
+            method: 'card',
+            status: cardResponse.status,
+            body: cardResponseText
+          };
+        } else {
+          lastError = `Card format failed: ${cardResponse.status} ${cardResponseText}`;
+          console.log('Card format failed:', lastError);
+        }
+      } catch (cardError) {
+        lastError = `Card format error: ${cardError.message}`;
+        console.log('Card format error:', cardError);
+      }
     }
 
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        message: "Webhook sent successfully",
-        response: {
-          status: response.status,
-          body: responseText
+    // 如果卡片格式失败，尝试简单消息格式
+    if (!success && simpleMessage) {
+      try {
+        console.log('Trying simple message format:', JSON.stringify(simpleMessage, null, 2));
+        
+        const simpleResponse = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(simpleMessage)
+        });
+
+        console.log('Simple message response status:', simpleResponse.status);
+        console.log('Simple message response ok:', simpleResponse.ok);
+
+        const simpleResponseText = await simpleResponse.text();
+        console.log('Simple message response body:', simpleResponseText);
+
+        if (simpleResponse.ok) {
+          success = true;
+          responseData = {
+            method: 'simple',
+            status: simpleResponse.status,
+            body: simpleResponseText
+          };
+        } else {
+          lastError = `Simple message failed: ${simpleResponse.status} ${simpleResponseText}`;
+          console.log('Simple message failed:', lastError);
         }
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders,
-        },
+      } catch (simpleError) {
+        lastError = `Simple message error: ${simpleError.message}`;
+        console.log('Simple message error:', simpleError);
       }
-    );
+    }
+
+    if (success) {
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Webhook sent successfully",
+          response: responseData
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders,
+          },
+        }
+      );
+    } else {
+      throw new Error(lastError || 'All webhook formats failed');
+    }
 
   } catch (error) {
     console.error('Failed to send webhook notification:', error);
