@@ -3,10 +3,11 @@ import { Header } from './components/Header'
 import { Dashboard } from './components/Dashboard'
 import { IPCard } from './components/IPCard'
 import { IPForm } from './components/IPForm'
+import { WebhookLogs } from './components/WebhookLogs'
 import { useIPRecords, useUpdateIPStatus } from './hooks/useIPRecords'
 import { checkIPConnection, batchCheckIPs } from './services/ipChecker'
 import { IPRecord } from './types/ip'
-import { Loader2, AlertCircle } from 'lucide-react'
+import { Loader2, AlertCircle, Bell } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [checkingIPs, setCheckingIPs] = useState<Set<string>>(new Set())
   const [isBatchChecking, setIsBatchChecking] = useState(false)
+  const [showWebhookLogs, setShowWebhookLogs] = useState(false)
 
   const { data: records = [], isLoading, error } = useIPRecords()
   const updateStatusMutation = useUpdateIPStatus()
@@ -135,7 +137,22 @@ function App() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
-        <Dashboard records={records} />
+        <div className="flex items-center justify-between mb-6">
+          <Dashboard records={records} />
+          <button
+            onClick={() => setShowWebhookLogs(!showWebhookLogs)}
+            className="btn-secondary flex items-center space-x-2"
+          >
+            <Bell className="h-4 w-4" />
+            <span>{showWebhookLogs ? '隐藏' : '显示'}通知日志</span>
+          </button>
+        </div>
+
+        {showWebhookLogs && (
+          <div className="mb-8">
+            <WebhookLogs />
+          </div>
+        )}
 
         {filteredRecords.length === 0 ? (
           <div className="text-center py-12">
