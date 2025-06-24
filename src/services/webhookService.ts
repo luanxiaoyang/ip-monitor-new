@@ -181,19 +181,28 @@ export const sendWebhookNotification = async (
   try {
     const card = createLarkCard(notification)
     
-    const response = await fetch(webhookUrl, {
+    // Use the Supabase Edge Function to send the webhook
+    const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-webhook`
+    
+    const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(card)
+      body: JSON.stringify({
+        webhookUrl,
+        card
+      })
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(`Edge Function error! status: ${response.status}, message: ${errorData.error || 'Unknown error'}`)
     }
 
-    return true
+    const result = await response.json()
+    return result.success === true
   } catch (error) {
     console.error('Failed to send webhook notification:', error)
     return false
